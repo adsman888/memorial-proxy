@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "https://app.rememberingollie.com/api/memorial-sitemap.xml"
+      "destination": "/api/sitemap"
     },
     {
       "source": "/:path*",
