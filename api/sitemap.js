@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
   const MEMORIAL_BASE = "https://memorial.rememberingollie.com";
-  const API_URL = "https://app.rememberingollie.com/api/memorial-sitemap-data";
+  const API_URL = "https://rollieorder-xdvfbmbh.manus.space/api/memorial-sitemap-data";
   const API_KEY = process.env.SONG_LIBRARY_API_KEY;
 
   try {
