@@ -5,8 +5,12 @@
       "destination": "/api/sitemap"
     },
     {
+      "source": "/robots.txt",
+      "destination": "/robots.txt"
+    },
+    {
       "source": "/:path*",
-      "destination": "https://d2xsxph8kpxj0f.cloudfront.net/310519663317797962/XdvfbMbHhdR6a9owVrzwKx/memorials/:path*"
+      "destination": "/api/memorial"
     }
   ]
 }
