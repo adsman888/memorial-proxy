@@ -1,13 +1,14 @@
 /**
  * Vercel Serverless Function — Memorial Page Proxy
  * 
- * Instead of a static rewrite to the canonical S3 key (which gets CDN-cached),
- * this function looks up the versioned URL from the Rollie Order App API.
+ * Looks up the versioned URL from the Rollie Order App API for every request.
  * This ensures that regenerated memorial pages are served immediately.
  * 
- * Handles both:
- *   - /abc-123.html (externalOrderId)
- *   - /buddys-page.html (customUrlSlug)
+ * Handles:
+ *   - /abc-123        (externalOrderId, no extension)
+ *   - /abc-123.html   (externalOrderId, with extension)
+ *   - /charlie         (customUrlSlug, no extension)
+ *   - /charlie.html    (customUrlSlug, with extension)
  */
 export default async function handler(req, res) {
   const API_URL = "https://rollieorder-xdvfbmbh.manus.space/api/memorial-lookup";
@@ -15,18 +16,21 @@ export default async function handler(req, res) {
   // CloudFront base for fallback (canonical key)
   const S3_BASE = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317797962/XdvfbMbHhdR6a9owVrzwKx/memorials";
 
-  // Extract the slug from the URL path (e.g., /abc-123.html → abc-123.html)
-  const slug = req.url.replace(/^\//, "").replace(/\?.*$/, "");
+  // Extract the slug from the URL path (e.g., /charlie → charlie, /abc-123.html → abc-123.html)
+  const rawSlug = req.url.replace(/^\//, "").replace(/\?.*$/, "");
 
-  if (!slug || slug === "" || slug === "index.html") {
+  if (!rawSlug || rawSlug === "" || rawSlug === "index.html") {
     // Root path — redirect to main site
     return res.redirect(302, "https://www.rememberingollie.com");
   }
 
-  // Skip non-HTML requests (favicon, robots.txt, etc.)
-  if (!slug.endsWith(".html")) {
-    return res.redirect(302, `${S3_BASE}/${slug}`);
+  // Skip known static files (favicon, robots.txt, etc.) — redirect to S3
+  if (/\.(ico|txt|png|jpg|jpeg|gif|svg|css|js|xml|json|webp|woff2?)$/i.test(rawSlug)) {
+    return res.redirect(302, `${S3_BASE}/${rawSlug}`);
   }
+
+  // Normalize: strip .html extension for the API lookup (API handles both formats)
+  const slug = rawSlug.replace(/\.html$/, "");
 
   try {
     if (!API_KEY) {
@@ -76,33 +80,41 @@ export default async function handler(req, res) {
 /**
  * Fallback: proxy directly from S3/CloudFront canonical key.
  * Used when the API is unavailable or the lookup fails.
+ * Tries both {slug}.html and {slug}/index.html patterns.
  */
 async function proxyFromS3(res, slug) {
   const S3_BASE = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317797962/XdvfbMbHhdR6a9owVrzwKx/memorials";
 
-  try {
-    const htmlResponse = await fetch(`${S3_BASE}/${slug}`);
+  // Try the .html version first (canonical key pattern)
+  const urlsToTry = [
+    `${S3_BASE}/${slug}.html`,
+    `${S3_BASE}/${slug}/index.html`,
+  ];
 
-    if (!htmlResponse.ok) {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(404).send(`
-        <!DOCTYPE html>
-        <html><head><title>Memorial Not Found</title></head>
-        <body style="font-family:sans-serif;text-align:center;padding:60px;background:#1a1a2e;color:#e0d5c1;">
-          <h1>Memorial Page Not Found</h1>
-          <p>This memorial page may not exist yet or has been removed.</p>
-          <a href="https://www.rememberingollie.com" style="color:#d4a574;">Visit Remembering Ollie</a>
-        </body></html>
-      `);
+  for (const url of urlsToTry) {
+    try {
+      const htmlResponse = await fetch(url);
+      if (htmlResponse.ok) {
+        const html = await htmlResponse.text();
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=300");
+        res.setHeader("X-Memorial-Source", "s3-fallback");
+        return res.status(200).send(html);
+      }
+    } catch (e) {
+      // Try next URL
     }
-
-    const html = await htmlResponse.text();
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=300");
-    res.setHeader("X-Memorial-Source", "s3-fallback");
-    return res.status(200).send(html);
-  } catch (error) {
-    console.error(`[Memorial Proxy] S3 fallback failed for ${slug}:`, error);
-    return res.status(502).send("Memorial page temporarily unavailable");
   }
+
+  // Nothing found — return 404
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(404).send(`
+    <!DOCTYPE html>
+    <html><head><title>Memorial Not Found</title></head>
+    <body style="font-family:sans-serif;text-align:center;padding:60px;background:#1a1a2e;color:#e0d5c1;">
+      <h1>Memorial Page Not Found</h1>
+      <p>This memorial page may not exist yet or has been removed.</p>
+      <a href="https://www.rememberingollie.com" style="color:#d4a574;">Visit Remembering Ollie</a>
+    </body></html>
+  `);
 }
